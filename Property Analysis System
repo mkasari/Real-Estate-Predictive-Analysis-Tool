@@ -190,7 +190,7 @@ def PropertiesHistogramsPlot():
     g.map(sns.histplot, "price")
     g.add_legend()
     g.fig.suptitle('Histograms of Properties by Beds')
-    plt.show()
+    plt.show() 
 
 def FilterByBed(num_beds, percent, buy_or_sell):
     filtered_df = AdjustPrice()[AdjustPrice()['beds']==num_beds]
