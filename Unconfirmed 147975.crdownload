@@ -1,0 +1,441 @@
+import requests
+from bs4 import BeautifulSoup
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from fredapi import Fred 
+from pandasgui import show
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+def main():
+    # print(MortgageRateScraper())
+    # print(FilterByBed(1,1,"sell")[0])
+    # print(MortgageProductToChoices())
+    # print(MortgageProductToInterestRate(9, 'apr'))
+    # print(AdjustPrice()[0])
+    UI()
+    print("Thank you for using our system!")
+
+'''  Data Functionality '''
+
+# Scrape Mortgage Data
+def MortgageRateScraper():
+    try:
+        page = requests.get("https://www.nerdwallet.com/mortgages/mortgage-rates")
+    except requests.ConnectionError:
+        print("Failed Connection")
+        return 0
+
+    soup = BeautifulSoup(page.content, 'html.parser')
+
+    chart = soup.find(class_="_3nUGb") # entire table div
+    titles = chart.find_all(class_ = '_38Ygu') # titles of table
+    raw = soup.find(class_="_3L8lw") # raw table
+    cleaned = raw.find_all(class_ = '_3jMVp') # individual rows of table
+
+    # empty lists to add data to
+    product = []
+    interest = []
+    apr = []
+
+    for i in range(0,9):
+        # get rows
+        product_i = cleaned[i*3].get_text()
+        product.append(product_i)
+        ir_i = cleaned[i*3+1].get_text()
+        interest.append(ir_i)
+        apr_i = cleaned[i*3+2].get_text()
+        apr.append(apr_i)
+
+    interest_rate_table = pd.DataFrame({
+        "product": product,
+        "interest": interest,
+        "apr": apr
+    })
+
+    return interest_rate_table
+
+def MortgageProductToChoices():
+    choice_to_mortgage_dic = {}
+    mortgage_products = MortgageRateScraper()['product'].tolist()
+    for i in range(len(mortgage_products)):
+        choice_to_mortgage_dic.update({(i+1) : mortgage_products[i]})
+    return choice_to_mortgage_dic
+
+def MortgageProductToInterestRate(choice, interest_rate_or_apr):
+    if(interest_rate_or_apr == "ir"):
+        mortgage_to_rate = dict(zip(MortgageRateScraper()['product'], MortgageRateScraper()['interest']))
+        return mortgage_to_rate[MortgageProductToChoices()[choice]]
+    if(interest_rate_or_apr == "apr"):
+        mortgage_to_rate = dict(zip(MortgageRateScraper()['product'], MortgageRateScraper()['apr']))
+        return mortgage_to_rate[MortgageProductToChoices()[choice]]
+
+
+def MortgageRatesForPrice(P, rate, months):        
+    try:
+        Month_Payment = (rate/12) * (1/(1-(1+rate/12)**(-months)))*P
+    except ZeroDivisionError:
+        Month_Payment=0
+    return Month_Payment
+    
+# Redfin Data Cleaning
+def RedfinDataLoad():
+    # Files to read and write
+    fin_redfin = open("redfin_2021-11-04-13-20-48.csv", "r")
+    fout_redfin = open("redfin_cleaned.csv", "w")
+
+    ## Headers
+    fout_redfin.write(next(fin_redfin))
+
+    ## Data 
+    for line in fin_redfin:
+        if(line.split(",")[0] == "MLS Listing"):
+            fout_redfin.write(line)
+
+    fin_redfin.close
+    fout_redfin.close
+
+# Zillow Data Cleaning
+def ZillowDataLoad():
+    # read_csv function which is used to read the required CSV file
+    data = pd.read_csv("dataset_my-task_2021-11-04_21-08-22-268.csv")
+
+    # unnessary columns for analysis, drop
+    columns =  ["currency","description","latitude","longitude","photos/0","photos/1","photos/2",
+                "photos/3","photos/4","photos/5","photos/6","photos/7","photos/8","photos/9","photos/10",
+                "photos/11","photos/12","photos/13","photos/14","photos/15","photos/16","photos/17","photos/18",
+                "photos/19","photos/20","photos/21","photos/22","photos/23","photos/24","photos/25","photos/26",
+                "photos/27","photos/28","photos/29","photos/30","photos/31","photos/32","photos/33","photos/34",
+                "photos/35","photos/36","photos/37","photos/38","photos/39","photos/40","photos/41","photos/42",
+                "photos/43","photos/44","photos/45","photos/46","photos/47","photos/48","photos/49","photos/50",
+                "photos/51","photos/52","photos/53","photos/54","photos/55","photos/56","photos/57","photos/58",
+                "photos/59","photos/60","photos/61","photos/62","homeStatus","address/community","address/neighborhood"]
+
+    data.drop(columns, axis=1, inplace=True)
+    data.to_csv("zillow_cleaned.csv", index=False)
+
+# Function to prep Redfin data for analysis
+def RedfinCleanedDataLoad():
+    RedfinDataLoad()
+
+    redfin_df = pd.read_csv("redfin_cleaned.csv")
+    redfin_df["source"] = "redfin"
+
+    redfin_df = redfin_df.iloc[:,[27,3,4,5,6,8,9,20,7]]
+
+    redfin_df_mapping = {redfin_df.columns[0]: "source",
+                         redfin_df.columns[1]: "address", 
+                         redfin_df.columns[2]: "city", 
+                         redfin_df.columns[3]: "state_or_province", 
+                         redfin_df.columns[4]: "zipcode", 
+                         redfin_df.columns[5]: "beds", 
+                         redfin_df.columns[6]: "baths", 
+                         redfin_df.columns[7]: "url", 
+                         redfin_df.columns[8]: "price"}
+                        
+    redfin_df = redfin_df.rename(columns=redfin_df_mapping)
+
+    return redfin_df
+
+# Function to prep Zillow data for analysis
+def ZillowCleanedDataLoad():
+    ZillowDataLoad()
+
+    zillow_df = pd.read_csv("zillow_cleaned.csv")
+    zillow_df["source"] = "zillow"
+
+    zillow_df = zillow_df.iloc[:,[11,2,0,1,4,6,5,9,8]]
+
+    zillow_df_mapping = {zillow_df.columns[0]: "source",
+                         zillow_df.columns[1]: "address", 
+                         zillow_df.columns[2]: "city", 
+                         zillow_df.columns[3]: "state_or_province", 
+                         zillow_df.columns[4]: "zipcode", 
+                         zillow_df.columns[5]: "beds", 
+                         zillow_df.columns[6]: "baths", 
+                         zillow_df.columns[7]: "url", 
+                         zillow_df.columns[8]: "price"}
+
+    zillow_df = zillow_df.rename(columns=zillow_df_mapping)
+
+    return zillow_df
+
+def MergeDatasets():
+    return pd.concat([RedfinCleanedDataLoad(), ZillowCleanedDataLoad()], axis=0)
+
+def AdjustPrice():
+    adjusted_df = MergeDatasets().dropna(subset=['beds']) # gets rid of nas
+    adjusted_df = adjusted_df.loc[(adjusted_df['beds']>0)] # get rid of places with no beds listed
+    adjusted_df = adjusted_df.loc[(adjusted_df['price']>0)] # get rid of places that have no price listed
+    adjusted_df = adjusted_df.groupby(['beds']).filter(lambda x: len(x) >= 30) # get rid of bed groups with less than 30 listings
+    adjusted_df['price_adjusted'] = adjusted_df.groupby('beds').transform(lambda x: (x - x.mean()) / x.std())['price']
+
+    return adjusted_df
+
+def BedroomOptions():
+    return [int(x) for x in list(AdjustPrice().groupby(['beds']).groups.keys())]
+
+def BedroomSummary():
+    beds_summary_df = AdjustPrice()
+    beds_summary_df = beds_summary_df.drop(columns=["baths", "zipcode", "price_adjusted"])
+    beds_summary_df = beds_summary_df.groupby("beds").describe()
+
+    return beds_summary_df
+
+def PropertiesHistogramsPlot():
+    properties_df = AdjustPrice()
+    g = sns.FacetGrid(properties_df, col="beds",
+                    height=2, aspect=3, col_wrap=2)
+    g.map(sns.histplot, "price")
+    g.add_legend()
+    g.fig.suptitle('Histograms of Properties by Beds')
+    plt.show()
+
+def FilterByBed(num_beds, percent, buy_or_sell):
+    filtered_df = AdjustPrice()[AdjustPrice()['beds']==num_beds]
+    if(buy_or_sell == "buy"):
+        std_dev_bound = filtered_df.price_adjusted.quantile(percent/100)
+        std_dev_bound = filtered_df
+        filtered_df = filtered_df[filtered_df.price_adjusted < filtered_df.price_adjusted.quantile(percent/100)]
+        return (filtered_df, std_dev_bound)
+    if(buy_or_sell == "sell"):
+        std_dev_bound = filtered_df.price_adjusted.quantile(1-(percent/100))
+        filtered_df= filtered_df[filtered_df.price_adjusted > filtered_df.price_adjusted.quantile(1-(percent/100))]
+        return (filtered_df, std_dev_bound) 
+
+def PropertiesToMortgage(num_beds, outlier_percent, buy_or_sell, product_choice, interest_rate_or_apr, months):
+    properties_df = FilterByBed(num_beds, outlier_percent, buy_or_sell)[0]
+    rate = float(MortgageProductToInterestRate(product_choice, interest_rate_or_apr).strip('%'))/100
+
+    properties_df['monthly_amount'] = properties_df.apply(lambda x: MortgageRatesForPrice(x['price'], rate, months), axis=1)
+    
+    properties_df['price'] = properties_df['price'].apply(lambda x: '${:,.2f}'.format((x)))
+    properties_df['monthly_amount'] = properties_df['monthly_amount'].apply(lambda x: '${:,.2f}'.format((x)))
+
+    return properties_df.drop(columns=['price_adjusted'])
+
+def USEconomyPlot():
+    fred = Fred(api_key='dc95dd9689cbb07e0107005ab846de24')
+
+    ##Getters
+    empl = fred.get_series('ATNHPIUS38300Q', observation_start='2009-1-1') # seasonally ajusted non-fram employment in thousands 
+    gdp = fred.get_series('NGMP38300', observation_start='2009-1-1') # Not included
+    unemp =fred.get_series('PITT342BP1FHSA', observation_start='2009-1-1') # seasonally ajusted unemployment rate in percent
+    SP500=fred.get_series('PITT342URN', observation_start='2009-1-1')  # only starts in 2010 at Fred for some reason
+    MORTGAGE30=fred.get_series('MORTGAGE30US', observation_start='2009-1-1')
+
+    ##Raw and Clean Data
+    fig, axs  = plt.subplots(2, 3,figsize=(12, 8))
+    fig.suptitle('US Economy since January 2009')
+
+    axs[0][0].plot(gdp.index,gdp.values)
+    axs[0][0].set_title("Total Gross Domestic Product for \nPittsburgh, PA (MSA)")
+    axs[0,0].set_ylabel("2012 $bn")
+
+    axs[0][1].plot(empl.index,empl.values)
+    axs[0][1].set_title("All-Transactions House Price Index for \nPittsburgh, PA")
+    axs[0,1].set_ylabel("thousands")
+
+    axs[1][0].plot(unemp.index,unemp.values)
+    axs[1][0].set_title("New Private Housing Units Authorized by Building Permits: \n1-Unit Structures for Pittsburgh, PA")
+    axs[1,0].set_ylabel("Units")
+
+    axs[1][1].plot(SP500.index,SP500.values)
+    axs[1][1].set_title("Unemployment Rate in Pittsburgh, PA")
+
+    axs[0][2].plot(MORTGAGE30.index,MORTGAGE30.values)
+    axs[0][2].set_title("Mortgage Rates")
+
+    #Specific data:
+    plt.tight_layout()
+
+    plt.plot(MORTGAGE30.index,MORTGAGE30.values)
+    plt.title("Mortgage Rates")
+
+    plt.show()
+
+''' User Interface '''
+
+def UI():
+    choice = 0
+    interestorapi = ""
+    months = 0
+    beds = 0
+    buyorsell = ""
+    outlierpercent=0
+
+    exitcondition = False
+
+    print("Welcome to SCAM LLC!")
+    print("100% guarantee you will NOT get scammed.\n")
+
+    while not exitcondition:
+        input_1_bad = True
+        while(input_1_bad):
+            print("Are you interested in buying or selling?\n")
+            print("Enter either \"buy\" or \"sell\":")
+
+            try:
+                buyorsell = input('\tYour choice: ').strip()
+                if(buyorsell == "exit"):
+                    exitcondition = True
+                    break
+                if not (buyorsell == "buy" or buyorsell == "sell"):
+                    raise Exception()
+            except:
+                print("Bad choice, try again")
+                buyorsell = ""
+            
+            if not (buyorsell == "buy" or buyorsell == "sell"):
+                print("Enter valid choice, \"buy\" or \"sell\"")
+            else:
+                input_1_bad = False
+            
+        if(exitcondition):
+            break
+        
+        
+        input_2_bad = True
+        while(input_2_bad):
+            print("\nWhat percent of properties would you like to filter out?\n")
+            print("Enter a percent number between 1-99, 70-99 is recommended:")
+
+            try:
+                outlierpercent_str = input('\tYour choice: ').strip()
+                if(outlierpercent_str == "exit"):
+                    exitcondition = True
+                    break
+                outlierpercent = int(outlierpercent_str)
+            except:
+                print("Bad choice, try again")
+                outlierpercent = -1
+            
+            if not 0 < outlierpercent < 100:
+                print("Choose a choice between 1-99")
+            else:
+                outlierpercent = 100 - outlierpercent
+                input_2_bad = False
+                
+
+        if(exitcondition):
+            break
+
+
+        input_3_bad = True
+        while input_3_bad:
+            print("\nSelect a mortgage product\n")
+            print("Enter only a number:")
+            a = MortgageProductToChoices()
+            for i in a: 
+                print(str(i)+".", a[i])
+            try:
+                choice_str = input('\tYour choice: ').strip()
+                if(choice_str == "exit"):
+                    exitcondition = True
+                    break
+                choice = int(choice_str)
+            except:
+                print("Bad choice, try again")
+                choice = -1
+            
+            if not 1 <= choice <= 9:
+                print("Choose a choice between 1-9")
+
+                # Code for first input ^
+            else:
+                input_3_bad = False
+        
+        if(exitcondition):
+            break
+
+        input_4_bad = True
+        while(input_4_bad):
+            # While loop 2
+            print("\nAre you interested in interest rate or apr?\n")
+            print("Enter 'ir' for Interest Rate and 'apr' for APR)")
+
+            try:
+                interestorapi_str = input('\tYour choice: ').strip()
+                if(interestorapi_str == "exit"):
+                    exitcondition = True
+                    break
+                if not (interestorapi_str == "ir" or interestorapi_str == "apr"):
+                    raise Exception()
+            except:
+                print("Bad choice, try again")
+                interestorapi_str = ""
+            
+            if not (interestorapi_str == "ir" or interestorapi_str == "apr"):
+                print("Enter valid choice, \"ir\" or \"apr\"")
+            else:
+                rate = MortgageProductToInterestRate(choice, interestorapi_str)
+                print("Your rate is: " + rate + "%")
+                input_4_bad = False
+
+        if(exitcondition):
+            break
+        
+        input_5_bad = True
+        while(input_5_bad):
+            print("\nLet's find your monthly mortgage payment.\n")
+            print("Enter the number of months:")
+
+            try:
+                months_str = input('\tMonths: ').strip()
+                if(months_str == "exit"):
+                    exitcondition = True
+                    break
+                months = int(months_str)
+            except:
+                print("Bad choice, try again")
+                months = -1
+            
+            if not months > 0:
+                print("Choose a valid number of months")
+            else:
+                rateCleaned = rate.replace("%", "")
+                input_5_bad = False
+        
+        if(exitcondition):
+            break
+
+        input_6_bad = True
+        while(input_6_bad):
+
+            print("\nSelect a number of bedrooms to filter on.\n")
+            print("Enter the number of bedrooms: " + str(BedroomOptions())[1:-1])
+
+            try:
+                beds_str = input('\tBeds: ').strip()
+                if(beds_str == "exit"):
+                    exitcondition = True
+                    break
+                beds = int(beds_str)
+            except:
+                print("Bad choice, try again")
+                beds = -1
+            
+            if not beds in BedroomOptions():
+                print("Choose a valid number of beds in the list")
+            else:
+                input_6_bad = False
+                
+            
+        if(exitcondition):
+            break
+
+        properties_df = AdjustPrice().drop(columns=["price_adjusted"])
+        filtered_df = PropertiesToMortgage(beds, outlierpercent, buyorsell, choice, interestorapi_str, months)
+        mortgage_df = MortgageRateScraper()
+        bedroom_summary_df = BedroomSummary()
+
+        
+        show(properties_df, filtered_df, bedroom_summary_df, mortgage_df)
+        PropertiesHistogramsPlot()
+        USEconomyPlot()
+
+        exitcondition = True
+
+if __name__ == '__main__':
+    main()
